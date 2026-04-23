@@ -3,10 +3,17 @@
 
 # Pino proxy
 
+[![License](https://img.shields.io/github/license/alxsuv/pino-proxy)](./LICENSE)
+[![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-43853d?logo=node.js&logoColor=white)](https://nodejs.org)
+[![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](./package.json)
+[![GitHub stars](https://img.shields.io/github/stars/alxsuv/pino-proxy?style=social)](https://github.com/alxsuv/pino-proxy/stargazers)
+
+[![Saves ~90% on Claude Code API](https://img.shields.io/badge/Claude%20Code%20API-~90%25%20saved-blueviolet?style=for-the-badge&logo=anthropic&logoColor=white)](#savings-math)
+
 </div>
 
 
-> **Cut your Claude Code API bill by ~90%.** Zero runtime dependencies, no build step, no SaaS. A ~500-line local reverse proxy that auto-places prompt-cache breakpoints the way Claude Code *should* be placing them.
+> **Aggressively trim your Claude Code API bill.** Zero runtime dependencies, no build step, no SaaS. A ~500-line local reverse proxy that auto-places prompt-cache breakpoints the way Claude Code *should* be placing them.
 
 A tiny local HTTP reverse proxy in front of `api.anthropic.com`. It forwards everything to upstream untouched **except** `/v1/messages` requests, where it optionally:
 
