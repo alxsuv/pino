@@ -1,0 +1,8 @@
+# Code owners for pino-proxy.
+# Syntax: https://docs.github.com/articles/about-code-owners
+#
+# Order matters — the last matching pattern wins. Keep broad patterns on top,
+# narrow overrides below.
+
+# Default owner for everything in the repo.
+* @alxsuv
