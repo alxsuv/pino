@@ -1,0 +1,22 @@
+{
+  "name": "pino-proxy",
+  "version": "0.1.0",
+  "description": "Local HTTP reverse proxy in front of api.anthropic.com with prompt-cache breakpoint injection and request body mutation.",
+  "type": "module",
+  "bin": {
+    "pino-proxy": "bin/pino-proxy.js"
+  },
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node bin/pino-proxy.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
+  "license": "MIT"
+}
