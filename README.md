@@ -17,13 +17,13 @@
 
 A tiny local HTTP reverse proxy in front of `api.anthropic.com`. It forwards everything to upstream untouched **except** `/v1/messages` requests, where it optionally:
 
-- **Auto-injects prompt-cache breakpoints** so large-but-static chunks (tools, system prompt, reminders, prior turns) get cached.
-- **Upgrades TTL to 1h** on cacheable content that doesn't change often — while keeping the rolling tail at 5m so you don't overpay the 2.0× write multiplier on a breakpoint that moves every turn.
+- **Auto-injects prompt-cache breakpoints** on the chunks Claude Code leaves uncached — most importantly `tools` (~24k tokens, zero breakpoints out of the box) and the static reminders block in `messages[0]`.
+- **Upgrades TTL to 1h** on cacheable content that doesn't change often. Claude Code does set `cache_control: {type: "ephemeral"}` on the system prompt, but **omits the `ttl` field** — which silently falls back to the new 5-minute default, so a thoughtful turn that takes a few minutes to read can blow past the window and re-pay the 1.25× write on the next turn. The proxy rewrites every ephemeral breakpoint to `ttl: "1h"` (except the rolling tail, which stays at 5m on purpose so you don't overpay the 2.0× write multiplier on a breakpoint that moves every turn).
 - **Drops unused tools** and scrubs their names from system reminders, shrinking request size.
 - **Strips ANSI escape codes** so terminal output in tool results caches cleanly.
 - **Makes the system prompt editable** — any part of the request body can be rewritten via a user-supplied `transform(body)` hook. No built-in system-prompt edits ship out of the box; the hook is the extension point.
 
-Designed primarily for **Claude Code**, where the same ~8k-token system prompt and ~24k-token tool catalog ship on every turn.
+Designed primarily for **Claude Code**, where the same ~24k-token tool catalog ships uncached on every turn, and the ~8k-token system prompt is on a fragile 5-minute timer — Claude Code's `cache_control` omits `ttl` and silently falls back to the 5-minute default, which a single thoughtful turn (long generation, slow tool call, user reading output) is enough to blow past.
 
 ### Proof, from a real session
 
@@ -39,7 +39,7 @@ cache_creation:                    cache_creation:
 output_tokens:               195   output_tokens:               802
 ```
 
-Opus pricing for this pair: **~$0.14 with the proxy vs ~$1.26 without** — a 5m rolling tail plus 1h caching on tools / system / reminders does the heavy lifting. See [Savings math](#savings-math) for the full breakdown.
+Opus pricing for this pair: **~$0.34 with the proxy vs ~$2.60 without** (input + output, computed from the `usage` numbers above) — a 5m rolling tail plus 1h caching on tools / system / reminders does the heavy lifting. See [Savings math](#savings-math) for the full breakdown.
 
 ## Quickstart
 
@@ -122,14 +122,47 @@ $env:ANTHROPIC_BASE_URL="http://127.0.0.1:8787"
 set ANTHROPIC_BASE_URL=http://127.0.0.1:8787
 ```
 
+## How to Verify (The Smoking Gun)
+
+You don't have to take my word for it. You can see what Claude Code actually ships in 60 seconds:
+
+1. **Start the proxy in pass-through mode** (captures logs but doesn't mutate anything yet):
+   ```bash
+   LOG_BODIES=1 npm start
+   ```
+
+2. **Run any command in Claude Code** (e.g., `claude "hi"`).
+
+3. **Inspect the captured request**:
+   ```bash
+   # 1. Tools: zero cache_control entries. The ~24k-token tool catalog is uncached.
+   jq '[.body.tools[] | select(.cache_control)] | length' logs/*.req.json
+
+   # 2. System: cache_control IS set, but ttl is missing → silent 5m default.
+   jq '.body.system[]? | select(.cache_control) | {len: (.text|length), cache_control}' logs/*.req.json
+   ```
+
+   Expected output: tools count is `0`, and every system `cache_control` is the bare `{"type":"ephemeral"}` with no `ttl` key. That bare form means **5 minutes** — long enough that a thoughtful turn can expire it and force a re-write next turn.
+
+4. **Now, enable the fix**:
+   Restart the proxy with `AUTO_CACHE=1`:
+   ```bash
+   AUTO_CACHE=1 LOG_BODIES=1 npm start
+   ```
+
+   Re-run the same `jq` queries against the new `logs/*.req.json` and you'll see breakpoints added to `tools`, every ephemeral rewritten to `ttl: "1h"` (except the rolling tail), and `anthropic-beta` carrying `extended-cache-ttl-2025-04-11`.
+
+5. **Run another command and watch the hits**:
+   Your Anthropic API dashboard (or the response `usage` field) will now show `cache_read_input_tokens` capturing ~90% of your input bill.
+
 ## How the caching works
 
 The Anthropic API allows up to **4 cache breakpoints** per request. Each breakpoint tells the API "cache everything up to and including this block" so subsequent requests with the same prefix hit the cache at 0.1× base input price instead of 1× base.
 
 This proxy places them as follows (within the 4-slot ceiling):
 
-1. **Last `tools` entry** → 1h TTL. Tool catalog rarely changes; caching it saves ~24k tokens/turn.
-2. **Last `system` block** → 1h TTL. The ~8k-token Claude Code system prompt is stable for hours.
+1. **Last `tools` entry** → 1h TTL. Claude Code ships **zero** breakpoints on `tools`, so the entire ~24k-token catalog is re-billed at full input price every turn. This is the single biggest win.
+2. **Last `system` block** → 1h TTL. The Claude Code system prompt is ~8k tokens and stable for hours. Claude Code does set `cache_control` on system blocks, but without `ttl`, so it falls back to the 5m default — long enough that a thoughtful turn can expire the window and force a 1.25× re-write next turn on all ~8k tokens. The proxy rewrites it to 1h (and strips wasteful breakpoints on system blocks <500 chars — Claude Code puts one on a ~57-char block, burning a full slot to cache ~15 tokens).
 3. **Last cacheable block of `messages[0]`** → 1h TTL. Claude Code stuffs static reminders (CLAUDE.md, skills catalog, deferred-tools list — ~5k tokens) into the first user message. Cached once per session.
 4. **Rolling tail** → 5m TTL by default (configurable via `TAIL_TTL=1h`). The last `text`/`tool_result`/`image` block across all messages. Moves each turn so every new turn reads the prior turn's prefix from cache and only pays base price for the delta. 5m is the right default because the tail rarely survives an hour of reuse; paying the 2.0× write multiplier for a breakpoint that moves constantly is wasteful.
 
@@ -157,6 +190,10 @@ Typical Claude Code request, steady-state mid-session:
 | `messages[0]` reminders           | 5,000   | $0.0150       | $0.00150               | **$0.0135**        |
 | Prior-turn history (rolling tail) | ~15,000 | $0.0450       | $0.00450               | **$0.0405**        |
 | **Per-turn total (input)**        | ~52,600 | **$0.158**    | **$0.0158**            | **~$0.142 (−90%)** |
+
+> **Note on the "Without proxy" column:**
+> - `tools` and `messages[0]` reminders are charged at full 1.0× because Claude Code ships **zero breakpoints** on them — they are genuinely uncached, every turn, no asterisk.
+> - `system` and the rolling tail *do* get a (TTL-less, 5m default) breakpoint from Claude Code, so within a 5-minute window they would read at 0.1× and the gap would be smaller. The table charges them at 1.0× to represent the worst case where the 5m window expires between turns and forces a re-write — which a single thoughtful turn (long generation, slow tool call, user reading output) is enough to trigger. That's exactly the failure mode this proxy targets; the 1h TTL it writes is much harder to expire by accident.
 
 First turn pays a **cache-write surcharge**: `(24.4k + 8.2k + 5k) × $3 × (2.0 − 1.0) / 1M = $0.113` extra. Breakeven at **turn 2**; every turn after is pure win.
 
