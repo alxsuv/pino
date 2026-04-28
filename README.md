@@ -209,27 +209,22 @@ The Anthropic API is **stateless**: every HTTP request carries the full conversa
 
 Each of those round trips re-ships the ~24k-token tool catalog at full input price (no breakpoint) and risks the system prompt's TTL-less 5-minute window expiring (1.25× re-write).
 
-**What it costs in real money** (per-call totals from the table above × 30 round trips as a conservative typical-message baseline, including the one-time cache-write surcharge):
+**What it costs in real money** at three round-trip volumes (per-call totals from the table above × N, including the one-time cache-write surcharge):
 
-| Pricing tier        | Without proxy | With proxy | Saved per user message |
-|---------------------|---------------|------------|------------------------|
-| Sonnet ($3/M input) | ~$4.74        | ~$0.59     | **~$4.15**             |
-| Opus ($15/M input)  | ~$23.70       | ~$2.94     | **~$20.76**            |
+| Volume                              | Pricing tier        | Without proxy | With proxy | Saved        |
+|-------------------------------------|---------------------|---------------|------------|--------------|
+| 10 trips (small task)               | Sonnet ($3/M input) | ~$1.58        | ~$0.27     | **~$1.31**   |
+|                                     | Opus ($15/M input)  | ~$7.90        | ~$1.36     | **~$6.54**   |
+| 30 trips (typical user message)     | Sonnet              | ~$4.74        | ~$0.59     | **~$4.15**   |
+|                                     | Opus                | ~$23.70       | ~$2.94     | **~$20.76**  |
+| 100 trips (heavy session)           | Sonnet              | ~$15.80       | ~$1.69     | **~$14.11**  |
+|                                     | Opus                | ~$79.00       | ~$8.46     | **~$70.54**  |
 
-The cache-write surcharge (~$0.11 Sonnet / ~$0.57 Opus) is paid once per cache window, not once per round trip — so on a session that stays inside the 1h TTL, you pay it once at the start and every subsequent round trip is a pure cache read at 0.1×.
+Numbers are input-only; output costs are unchanged (output isn't cached). The cache-write surcharge (~$0.11 Sonnet / ~$0.57 Opus) is paid once per cache window, not once per round trip — so on a session that stays inside the 1h TTL, you pay it once at the start and every subsequent round trip is a pure cache read at 0.1×.
+
+> **Note on billing models.** The dollar figures above apply to **pay-as-you-go API usage** (Claude Code authenticated with an `x-api-key`). If you use Claude Code via a **Pro / Max subscription**, your flat monthly fee obviously doesn't change — but **everything above still matters, because cached tokens count fractionally against your 5-hour rate-limit window**. The same ~10× savings ratio that shows up as cash on the API shows up as session length on a subscription: turns that would have eaten your usage in two hours can now run for six, eight, or longer before you hit the cap. On a heavy debugging day, that's the difference between getting blocked at 3pm and shipping the feature by EOD. The request-shrinking features (`DROP_TOOLS`, `STRIP_ANSI`, `TRIM_BASH_GIT`) compound this further — see [Request-size savings](#request-size-savings-drop_tools--ansi-strip).
 
 **Why caching dominates trimming.** Trimming the tool catalog (e.g., `DROP_TOOLS=…` shaves ~3k tokens) saves you `3k × N round trips` *without* caching. With caching, it only saves you `3k × 1 cache write + 3k × (N−1) cache reads` — roughly an order of magnitude smaller win. Caching is the load-bearing optimization; trimming is a useful add-on once caching is in place.
-
-### Session-scale savings
-
-A typical Claude Code session is some mix of small and large user messages. Numbers below assume ~40 round trips total — equivalent to one or two non-trivial user messages, or several smaller ones:
-
-| Pricing tier        | Without proxy | With proxy | Saved per session |
-|---------------------|---------------|------------|-------------------|
-| Sonnet ($3/M input) | ~$6.31        | ~$0.74     | **~$5.57**        |
-| Opus ($15/M input)  | ~$31.56       | ~$3.72     | **~$27.84**       |
-
-Numbers are input-only; output costs are unchanged (output isn't cached). Heavy multi-message sessions multiply this several times over — see the round-trip multiplier above. Long-running sessions benefit most.
 
 ### Request-size savings (`DROP_TOOLS` + ANSI strip)
 
