@@ -27,7 +27,7 @@ Designed primarily for **Claude Code**, where the same ~24k-token tool catalog s
 
 ### Proof, from a real session
 
-Two consecutive turns proxied through pino-proxy. Numbers are raw `usage` fields from the Anthropic API response:
+Two consecutive API requests proxied through pino-proxy. Numbers are raw `usage` fields from the Anthropic API response:
 
 ```text
 # Turn N                           # Turn N+1
@@ -179,9 +179,9 @@ Anthropic pricing multipliers (all relative to base input):
 | Cache write, 1h TTL   | 2.0×       |
 | Cache read (hit)      | 0.1×       |
 
-### Per-turn savings (Claude Sonnet, $3 / $15 per M input/output)
+### Per-API-call savings (Claude Sonnet, $3 / $15 per M input/output)
 
-Typical Claude Code request, steady-state mid-session:
+A "turn" below means **one HTTP round trip to `api.anthropic.com`**, not one user message. (One user message expands into many round trips — see [Round-trip multiplier](#round-trip-multiplier-the-bigger-win) below.) Numbers reflect a typical Claude Code request, steady-state mid-session:
 
 | Chunk                             | Tokens  | Without proxy | With proxy (cache hit) | Savings            |
 |-----------------------------------|---------|---------------|------------------------|--------------------|
@@ -189,7 +189,7 @@ Typical Claude Code request, steady-state mid-session:
 | `system`                          | 8,200   | $0.0246       | $0.00246               | **$0.0221**        |
 | `messages[0]` reminders           | 5,000   | $0.0150       | $0.00150               | **$0.0135**        |
 | Prior-turn history (rolling tail) | ~15,000 | $0.0450       | $0.00450               | **$0.0405**        |
-| **Per-turn total (input)**        | ~52,600 | **$0.158**    | **$0.0158**            | **~$0.142 (−90%)** |
+| **Per-call total (input)**        | ~52,600 | **$0.158**    | **$0.0158**            | **~$0.142 (−90%)** |
 
 > **Note on the "Without proxy" column:**
 > - `tools` and `messages[0]` reminders are charged at full 1.0× because Claude Code ships **zero breakpoints** on them — they are genuinely uncached, every turn, no asterisk.
@@ -197,16 +197,34 @@ Typical Claude Code request, steady-state mid-session:
 
 First turn pays a **cache-write surcharge**: `(24.4k + 8.2k + 5k) × $3 × (2.0 − 1.0) / 1M = $0.113` extra. Breakeven at **turn 2**; every turn after is pure win.
 
-### Session-scale savings
+### Round-trip multiplier (the bigger win)
 
-A typical Claude Code debugging session = 30–50 turns. Using 40 turns as a baseline:
+The per-call savings above already look good — but in practice they get multiplied by the number of round trips per user message, and that's the number that makes the bill scary.
 
-| Pricing tier        | Without proxy | With proxy | Saved per session |
-|---------------------|---------------|------------|-------------------|
-| Sonnet ($3/M input) | ~$6.31        | ~$0.74     | **~$5.57**        |
-| Opus ($15/M input)  | ~$31.56       | ~$3.72     | **~$27.84**       |
+The Anthropic API is **stateless**: every HTTP request carries the full conversation context (system + tools + prior messages + prior tool results). Claude Code's loop also makes **one round trip per tool call** — Read, Grep, Edit, Bash, another Read, etc. So a single user prompt like "fix this bug" routinely expands into:
 
-Numbers are input-only; output costs are unchanged (output isn't cached). Exact savings depend on how much context churns — long running sessions benefit most.
+- ~10–20 round trips for a small task
+- ~30–50 for a typical debugging or feature-implementation message
+- 100+ for a long agentic task or a `/plan`-style multi-phase run
+
+Each of those round trips re-ships the ~24k-token tool catalog at full input price (no breakpoint) and risks the system prompt's TTL-less 5-minute window expiring (1.25× re-write).
+
+**What it costs in real money** at three round-trip volumes (per-call totals from the table above × N, including the one-time cache-write surcharge):
+
+| Volume                              | Pricing tier        | Without proxy | With proxy | Saved        |
+|-------------------------------------|---------------------|---------------|------------|--------------|
+| 10 trips (small task)               | Sonnet ($3/M input) | ~$1.58        | ~$0.27     | **~$1.31**   |
+|                                     | Opus ($15/M input)  | ~$7.90        | ~$1.36     | **~$6.54**   |
+| 30 trips (typical user message)     | Sonnet              | ~$4.74        | ~$0.59     | **~$4.15**   |
+|                                     | Opus                | ~$23.70       | ~$2.94     | **~$20.76**  |
+| 100 trips (heavy session)           | Sonnet              | ~$15.80       | ~$1.69     | **~$14.11**  |
+|                                     | Opus                | ~$79.00       | ~$8.46     | **~$70.54**  |
+
+Numbers are input-only; output costs are unchanged (output isn't cached). The cache-write surcharge (~$0.11 Sonnet / ~$0.57 Opus) is paid once per cache window, not once per round trip — so on a session that stays inside the 1h TTL, you pay it once at the start and every subsequent round trip is a pure cache read at 0.1×.
+
+> **Note on billing models.** The dollar figures above apply to **pay-as-you-go API usage** (Claude Code authenticated with an `x-api-key`). If you use Claude Code via a **Pro / Max subscription**, your flat monthly fee obviously doesn't change — but **everything above still matters, because cached tokens count fractionally against your 5-hour rate-limit window**. The same ~10× ratio that shows up as cash on the API shows up as session length on a subscription: heavy agentic work that burns through the entire usage cap in ~30 minutes without the proxy can run for 3–4 hours with caching in place. On a heavy debugging day, that's the difference between hitting the wall right after lunch and finishing the feature inside the same window. The request-shrinking features (`DROP_TOOLS`, `STRIP_ANSI`, `TRIM_BASH_GIT`) compound this further — see [Request-size savings](#request-size-savings-drop_tools--ansi-strip).
+
+**Why caching dominates trimming.** Trimming the tool catalog (e.g., `DROP_TOOLS=…` shaves ~3k tokens) saves you `3k × N round trips` *without* caching. With caching, it only saves you `3k × 1 cache write + 3k × (N−1) cache reads` — roughly an order of magnitude smaller win. Caching is the load-bearing optimization; trimming is a useful add-on once caching is in place.
 
 ### Request-size savings (`DROP_TOOLS` + ANSI strip)
 
