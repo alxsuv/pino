@@ -3,10 +3,10 @@
 
 # Pino proxy
 
-[![License](https://img.shields.io/github/license/alxsuv/pino-proxy)](./LICENSE)
+[![License](https://img.shields.io/github/license/alxsuv/pino)](./LICENSE)
 [![Node](https://img.shields.io/badge/node-%E2%89%A5%2020-43853d?logo=node.js&logoColor=white)](https://nodejs.org)
 [![Zero dependencies](https://img.shields.io/badge/dependencies-0-brightgreen)](./package.json)
-[![GitHub stars](https://img.shields.io/github/stars/alxsuv/pino-proxy?style=social)](https://github.com/alxsuv/pino-proxy/stargazers)
+[![GitHub stars](https://img.shields.io/github/stars/alxsuv/pino?style=social)](https://github.com/alxsuv/pino/stargazers)
 
 [![Saves ~90% on Claude Code API](https://img.shields.io/badge/Claude%20Code%20API-~90%25%20saved-blueviolet?style=for-the-badge&logo=anthropic&logoColor=white)](#savings-math)
 
@@ -46,8 +46,8 @@ Opus pricing for this pair: **~$0.34 with the proxy vs ~$2.60 without** (input +
 ### 1. Clone and install
 
 ```bash
-git clone https://github.com/alxsuv/pino-proxy
-cd pino-proxy
+git clone https://github.com/alxsuv/pino
+cd pino
 ```
 
 No `npm install` needed — zero runtime dependencies. Requires Node >= 20.
