@@ -9,6 +9,7 @@ import {
   normalizeTailBreakpoints,
   rewriteCacheControl,
 } from "./cache.js";
+import { rewriteSystemModelRefs } from "./model.js";
 import {
   createResponseLogStream,
   fileTs,
@@ -32,7 +33,7 @@ function isMessagesPath(pathname) {
 }
 
 export function createServer({ config, transformFn }) {
-  const { AUTO_CACHE, LOG_BODIES, LOG_DIR, TAIL_TTL } = config;
+  const { AUTO_CACHE, LOG_BODIES, LOG_DIR, TAIL_TTL, MODEL_OVERRIDE } = config;
 
   return http.createServer((req, res) => {
     const chunks = [];
@@ -48,7 +49,7 @@ export function createServer({ config, transformFn }) {
         isMessagesPath(req.url || "") &&
         isJsonRequest(req) &&
         rawBody.length > 0 &&
-        (AUTO_CACHE || transformFn);
+        (AUTO_CACHE || transformFn || MODEL_OVERRIDE);
 
       let parsed = null;
       if (mutate) {
@@ -57,6 +58,13 @@ export function createServer({ config, transformFn }) {
         } catch (err) {
           log("WARN parse failed, forwarding original body:", err.message);
         }
+      }
+
+      if (parsed && MODEL_OVERRIDE) {
+        const prev = parsed.model;
+        parsed.model = MODEL_OVERRIDE;
+        const sysHits = rewriteSystemModelRefs(parsed, MODEL_OVERRIDE);
+        notes.push(`model=${prev}->${MODEL_OVERRIDE},sys-rewrites=${sysHits}`);
       }
 
       if (parsed && transformFn) {
@@ -170,7 +178,7 @@ export async function startServer() {
   server.listen(config.PORT, "127.0.0.1", () => {
     log(`pino-proxy listening on http://127.0.0.1:${config.PORT}`);
     log(
-      `settings: AUTO_CACHE=${config.AUTO_CACHE} TAIL_TTL=${config.TAIL_TTL} TRANSFORM_FILE=${config.TRANSFORM_FILE || "(none)"} LOG_BODIES=${config.LOG_BODIES} LOG_DIR=${config.LOG_DIR}`,
+      `settings: AUTO_CACHE=${config.AUTO_CACHE} TAIL_TTL=${config.TAIL_TTL} MODEL_OVERRIDE=${config.MODEL_OVERRIDE || "(none)"} TRANSFORM_FILE=${config.TRANSFORM_FILE || "(none)"} LOG_BODIES=${config.LOG_BODIES} LOG_DIR=${config.LOG_DIR}`,
     );
     log(`export ANTHROPIC_BASE_URL=http://127.0.0.1:${config.PORT}`);
   });

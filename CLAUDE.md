@@ -33,6 +33,7 @@ src/server.js              # createServer() + startServer(); the HTTP request ha
 src/config.js              # env parsing (loadConfig), TRANSFORM_FILE loader, constants (UPSTREAM_HOST, BETA_FLAG, ceilings)
 src/cache.js               # rewriteCacheControl, injectBreakpointIfAbsent, ensureBetaHeader, countCacheBreakpoints
 src/logger.js              # ts/fileTs/log, sanitizeHeaders, writeRequestLog, createResponseLogStream
+src/model.js               # rewriteSystemModelRefs — rewrites model ID/name refs in system blocks for MODEL_OVERRIDE
 src/transforms/default.js  # env-driven example transform (DROP_TOOLS, STRIP_ANSI, TRIM_BASH_GIT)
 ```
 
@@ -42,18 +43,19 @@ src/transforms/default.js  # env-driven example transform (DROP_TOOLS, STRIP_ANS
 
 Single HTTP server on `127.0.0.1:$PORT` that streams every request to `api.anthropic.com` over HTTPS. Request bodies are buffered (not streamed) so they can be parsed and mutated; responses are streamed straight through (and optionally tee'd to a log file).
 
-Mutation only applies when **all** of these hold: `POST`, path is `/v1/messages`, `content-type: application/json`, body is non-empty, and at least one of `AUTO_CACHE` / `TRANSFORM_FILE` is set. Otherwise the bytes are forwarded untouched.
+Mutation only applies when **all** of these hold: `POST`, path is `/v1/messages` (or `/v1/messages/count_tokens`), `content-type: application/json`, body is non-empty, and at least one of `AUTO_CACHE` / `TRANSFORM_FILE` / `MODEL_OVERRIDE` is set. Otherwise the bytes are forwarded untouched.
 
 Order of operations on the parsed body:
-1. `transformFn(body)` from `TRANSFORM_FILE` (user-supplied, can mutate in place or return a new object).
-2. `injectBreakpointIfAbsent` — places up to four `cache_control: { type: "ephemeral" }` markers within the **4-breakpoint API ceiling** (`BREAKPOINT_CEILING`):
+1. `MODEL_OVERRIDE` — replaces `body.model` and rewrites model-name references in `body.system` blocks via `rewriteSystemModelRefs` (from `src/model.js`).
+2. `transformFn(body)` from `TRANSFORM_FILE` (user-supplied, can mutate in place or return a new object).
+3. `injectBreakpointIfAbsent` — places up to four `cache_control: { type: "ephemeral" }` markers within the **4-breakpoint API ceiling** (`BREAKPOINT_CEILING`):
    1. **Strip small system breakpoints** — removes client-sent `cache_control` from any `system` block shorter than `MIN_SYSTEM_CACHE_CHARS` (500). Caching <125 tokens isn't worth burning a slot; Claude Code sends a wasteful breakpoint on a tiny system entry that this pass reclaims.
    2. **Tools** — last entry in `body.tools` → 1h TTL.
    3. **System** — last entry in `body.system` → 1h TTL (skipped if any system block already has a breakpoint).
    4. **`messages[0]` reminders** — last cacheable block in the first message → 1h TTL. Only placed when `messages.length > 1` (otherwise the rolling tail covers it). Caches the static `<system-reminder>` / CLAUDE.md / skills-catalog blocks that Claude Code stuffs into msg[0].
    5. **Rolling tail** — last `text`/`tool_result`/`image` block across messages → default (5m) TTL. Moves every turn. String-form `content` is normalized to an array so string messages are cacheable.
-3. `rewriteCacheControl` — recursively bumps every existing `ephemeral` cache_control to `ttl: "1h"`.
-4. `ensureBetaHeader` — appends `extended-cache-ttl-2025-04-11` to `anthropic-beta` (required for 1h TTL).
+4. `rewriteCacheControl` — recursively bumps every existing `ephemeral` cache_control to `ttl: "1h"`.
+5. `ensureBetaHeader` — appends `extended-cache-ttl-2025-04-11` to `anthropic-beta` (required for 1h TTL).
 
 Key invariant: the tail breakpoint uses `TAIL_TTL` (default `5m`, optionally `1h`) because it moves every turn. `injectBreakpointIfAbsent` returns the set of tail blocks it placed; `rewriteCacheControl` is passed that set as `skip` so the tail's TTL is preserved while every other ephemeral breakpoint is still bumped to 1h.
 
