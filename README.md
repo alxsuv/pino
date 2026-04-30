@@ -269,17 +269,18 @@ Check `logs/*.req.json` after a turn to see which tools your client actually shi
 
 ## Environment variables
 
-| Var              | Default  | What it does                                                                                                      |
-|------------------|----------|-------------------------------------------------------------------------------------------------------------------|
-| `PORT`           | `8787`   | Local port to bind (always `127.0.0.1`).                                                                          |
-| `AUTO_CACHE`     | off      | Enable cache breakpoint injection + 1h TTL rewrite + beta header.                                                 |
-| `TAIL_TTL`       | `5m`     | TTL for the rolling-tail breakpoint. `5m` (recommended) or `1h`. Other slots are always 1h.                       |
-| `TRANSFORM_FILE` | —        | Path to a JS module exporting `transform(body)` for custom body edits.                                            |
-| `DROP_TOOLS`     | —        | Comma-separated tool names to remove from `body.tools` *(requires `TRANSFORM_FILE=./src/transforms/default.js`)*. |
-| `STRIP_ANSI`     | `1`      | Strip ANSI escapes from message text + tool results. Set to `0` to disable.                                       |
-| `TRIM_BASH_GIT`  | `0`      | Truncate the Bash tool description at its "Committing changes" section.                                           |
-| `LOG_BODIES`     | off      | Dump post-mutation request JSON + raw response bytes to `LOG_DIR`.                                                |
-| `LOG_DIR`        | `./logs` | Where to write body dumps.                                                                                        |
+| Var              | Default  | What it does                                                                                                                                                                                   |
+|------------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `PORT`           | `8787`   | Local port to bind (always `127.0.0.1`).                                                                                                                                                       |
+| `AUTO_CACHE`     | off      | Enable cache breakpoint injection + 1h TTL rewrite + beta header.                                                                                                                              |
+| `TAIL_TTL`       | `5m`     | TTL for the rolling-tail breakpoint. `5m` (recommended) or `1h`. Other slots are always 1h.                                                                                                    |
+| `TRANSFORM_FILE` | —        | Path to a JS module exporting `transform(body)` for custom body edits.                                                                                                                         |
+| `DROP_TOOLS`     | —        | Comma-separated tool names to remove from `body.tools` *(requires `TRANSFORM_FILE=./src/transforms/default.js`)*.                                                                              |
+| `STRIP_ANSI`     | `1`      | Strip ANSI escapes from message text + tool results. Set to `0` to disable.                                                                                                                    |
+| `TRIM_BASH_GIT`  | `0`      | Truncate the Bash tool description at its "Committing changes" section.                                                                                                                        |
+| `MODEL_OVERRIDE` | —        | Force a different model on every `/v1/messages` request (e.g. `claude-opus-4-6`). Also rewrites model-name references inside `system` blocks so the model's self-description stays consistent. |
+| `LOG_BODIES`     | off      | Dump post-mutation request JSON + raw response bytes to `LOG_DIR`.                                                                                                                             |
+| `LOG_DIR`        | `./logs` | Where to write body dumps.                                                                                                                                                                     |
 
 ## Architecture in 30 seconds
 

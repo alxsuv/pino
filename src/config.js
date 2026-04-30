@@ -30,6 +30,7 @@ export function loadConfig() {
     LOG_DIR: path.resolve(process.env.LOG_DIR || "./logs"),
     TRANSFORM_FILE: process.env.TRANSFORM_FILE || "",
     TAIL_TTL: parseTailTtl(process.env.TAIL_TTL),
+    MODEL_OVERRIDE: process.env.MODEL_OVERRIDE || "",
   };
 }
 
