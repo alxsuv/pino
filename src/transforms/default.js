@@ -123,9 +123,92 @@ function trimSystem(body) {
   // }
 }
 
+function restructureV123(body) {
+  try {
+    if (!Array.isArray(body.messages) || body.messages.length === 0) return;
+
+    const msgs = body.messages;
+    const msg0 = msgs[0];
+    const msg1 = msgs.length > 1 ? msgs[1] : null;
+
+    const isCoreContext = (t) => {
+      // Explicitly reject command outputs and caveats, even if they mention interesting paths
+      if (t.includes("<local-command-stdout>") || t.includes("<local-command-caveat>")) {
+        return false;
+      }
+      return (
+        t.includes("ToolSearch") ||
+        t.includes("claudeMd") ||
+        t.includes(".claude/projects") ||
+        t.includes(".claude/plans")
+      );
+    };
+
+    const hasPattern = (msg, pattern) => {
+      if (!msg) return false;
+      const content = msg.content;
+      if (typeof content === "string") return content.includes(pattern);
+      if (Array.isArray(content)) {
+        return content.some((block) => typeof block.text === "string" && block.text.includes(pattern));
+      }
+      return false;
+    };
+
+    // Normalize msg0 for safe processing
+    if (typeof msg0.content === "string") {
+      msg0.content = [{ type: "text", text: msg0.content }];
+    }
+
+    let processed = false;
+
+    // Case A: Msg 1 is user and contains the main context (claudeMd)
+    if (msg1 && msg1.role === "user" && hasPattern(msg1, "claudeMd")) {
+      if (typeof msg1.content === "string") {
+        msg1.content = [{ type: "text", text: msg1.content }];
+      }
+
+      const blocksToMove = [];
+      const lastBlock = msg1.content[msg1.content.length - 1];
+
+      for (const block of msg1.content) {
+        if (typeof block.text === "string" && isCoreContext(block.text)) {
+          if (block !== lastBlock) {
+            blocksToMove.push(block);
+          }
+        }
+      }
+
+      if (blocksToMove.length > 0) {
+        msg0.content = blocksToMove;
+        msg1.content = [lastBlock];
+        console.log(`[transform] Case A: Moved ${blocksToMove.length} context blocks from Msg 1 to Msg 0.`);
+        processed = true;
+      }
+    }
+
+    // Case B: Msg 0 already contains the context, but might need cleaning
+    if (!processed && hasPattern(msg0, "claudeMd")) {
+      const initialCount = msg0.content.length;
+      msg0.content = msg0.content.filter(
+        (block) => typeof block.text === "string" && isCoreContext(block.text),
+      );
+      console.log(`[transform] Case B: Msg 0 filtered (${initialCount} -> ${msg0.content.length} blocks).`);
+      processed = true;
+    }
+
+    // Case C: No context found at all
+    if (!processed && !hasPattern(msg0, "claudeMd")) {
+      console.warn("[transform] WARNING: No required context (claudeMd) found in Msg 0 or Msg 1!");
+    }
+  } catch (err) {
+    console.error("[transform] *** ERROR IN restructureV123 ***", err);
+  }
+}
+
 export function transform(body) {
   trimTools(body);
   trimReminders(body);
   trimSystem(body);
+  restructureV123(body);
   stripAnsiFromMessages(body);
 }
