@@ -123,9 +123,66 @@ function trimSystem(body) {
   // }
 }
 
+function restructureV123(body) {
+  try {
+    if (!Array.isArray(body.messages) || body.messages.length < 2) return;
+
+    const msg0 = body.messages[0];
+    const msg1 = body.messages[1];
+
+    // Normalize content to arrays to simplify processing
+    if (typeof msg0.content === "string") {
+      msg0.content = [{ type: "text", text: msg0.content }];
+    }
+    if (typeof msg1.content === "string") {
+      msg1.content = [{ type: "text", text: msg1.content }];
+    }
+
+    if (!Array.isArray(msg0.content) || !Array.isArray(msg1.content)) {
+      console.log(`[transform] restructureV123: msg0.content or msg1.content is not an array/string`);
+      return;
+    }
+
+    // 1. Remove content of msg 0
+    msg0.content = [];
+
+    // 2. Identify blocks to move from msg 1 to msg 0
+    const blocksToMove = [];
+    const lastBlock = msg1.content[msg1.content.length - 1];
+
+    for (let i = 0; i < msg1.content.length; i++) {
+      const block = msg1.content[i];
+      if (!block || typeof block.text !== "string") continue;
+
+      const t = block.text;
+      const shouldMove = t.includes("ToolSearch") || t.includes("claudeMd") || t.includes(".claude/projects");
+
+      if (shouldMove) {
+        // Ensure we don't move the last block if it happens to match
+        if (block !== lastBlock) {
+          blocksToMove.push(block);
+        }
+      }
+    }
+
+    // Move them to msg 0
+    if (blocksToMove.length > 0) {
+      msg0.content = blocksToMove;
+    }
+
+    // 3. msg 1 should only contain the last one
+    msg1.content = [lastBlock];
+    
+    console.log(`[transform] *** Restructured Msg 0/1: Moved ${blocksToMove.length} blocks to Msg 0. Msg 1 trimmed ***`);
+  } catch (err) {
+    console.error("[transform] *** ERROR IN restructureV123 ***", err);
+  }
+}
+
 export function transform(body) {
   trimTools(body);
   trimReminders(body);
   trimSystem(body);
+  restructureV123(body);
   stripAnsiFromMessages(body);
 }
