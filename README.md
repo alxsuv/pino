@@ -289,12 +289,13 @@ bin/pino-proxy.js          # CLI entry (shebang)
 src/server.js              # HTTP server + request handler, exports startServer()
 src/config.js              # env parsing, constants, transform loader
 src/cache.js               # breakpoint inject/rewrite, beta header
+src/model.js               # model-name rewrites for system-prompt self-description
 src/logger.js              # timestamps, sanitizers, request/response log writers
-src/transforms/default.js  # example body mutator (env-driven)
+src/transforms/default.js  # default body mutator (env-driven tools/ANSI stripping)
 ```
 
 - `src/server.js` — HTTP server on `127.0.0.1:$PORT`. Buffers request bodies, parses JSON on matching paths, runs transform → inject → rewrite → beta-header pipeline, streams responses through.
-- `src/transforms/default.js` — Example body mutator. Env-driven. Handles tool drops, ANSI stripping, per-tool description rewrites.
+- `src/transforms/default.js` — Default body mutator. Handles tool drops, ANSI stripping, and context-restructuring.
 - Logging: `LOG_BODIES=1` writes `<reqId>.req.json` (post-mutation, auth redacted) + `<reqId>.resp.log` (raw response) per request.
 
 See [CLAUDE.md](./CLAUDE.md) for full internals, order of operations, gotchas, and pointers for extending the transform pipeline.
