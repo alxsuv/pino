@@ -125,55 +125,81 @@ function trimSystem(body) {
 
 function restructureV123(body) {
   try {
-    if (!Array.isArray(body.messages) || body.messages.length < 2) return;
+    if (!Array.isArray(body.messages) || body.messages.length === 0) return;
 
-    const msg0 = body.messages[0];
-    const msg1 = body.messages[1];
+    const msgs = body.messages;
+    const msg0 = msgs[0];
+    const msg1 = msgs.length > 1 ? msgs[1] : null;
 
-    // Normalize content to arrays to simplify processing
+    const isCoreContext = (t) => {
+      // Explicitly reject command outputs and caveats, even if they mention interesting paths
+      if (t.includes("<local-command-stdout>") || t.includes("<local-command-caveat>")) {
+        return false;
+      }
+      return (
+        t.includes("ToolSearch") ||
+        t.includes("claudeMd") ||
+        t.includes(".claude/projects") ||
+        t.includes(".claude/plans")
+      );
+    };
+
+    const hasPattern = (msg, pattern) => {
+      if (!msg) return false;
+      const content = msg.content;
+      if (typeof content === "string") return content.includes(pattern);
+      if (Array.isArray(content)) {
+        return content.some((block) => typeof block.text === "string" && block.text.includes(pattern));
+      }
+      return false;
+    };
+
+    // Normalize msg0 for safe processing
     if (typeof msg0.content === "string") {
       msg0.content = [{ type: "text", text: msg0.content }];
     }
-    if (typeof msg1.content === "string") {
-      msg1.content = [{ type: "text", text: msg1.content }];
-    }
 
-    if (!Array.isArray(msg0.content) || !Array.isArray(msg1.content)) {
-      console.log(`[transform] restructureV123: msg0.content or msg1.content is not an array/string`);
-      return;
-    }
+    let processed = false;
 
-    // 1. Remove content of msg 0
-    msg0.content = [];
+    // Case A: Msg 1 is user and contains the main context (claudeMd)
+    if (msg1 && msg1.role === "user" && hasPattern(msg1, "claudeMd")) {
+      if (typeof msg1.content === "string") {
+        msg1.content = [{ type: "text", text: msg1.content }];
+      }
 
-    // 2. Identify blocks to move from msg 1 to msg 0
-    const blocksToMove = [];
-    const lastBlock = msg1.content[msg1.content.length - 1];
+      const blocksToMove = [];
+      const lastBlock = msg1.content[msg1.content.length - 1];
 
-    for (let i = 0; i < msg1.content.length; i++) {
-      const block = msg1.content[i];
-      if (!block || typeof block.text !== "string") continue;
-
-      const t = block.text;
-      const shouldMove = t.includes("ToolSearch") || t.includes("claudeMd") || t.includes(".claude/projects");
-
-      if (shouldMove) {
-        // Ensure we don't move the last block if it happens to match
-        if (block !== lastBlock) {
-          blocksToMove.push(block);
+      for (const block of msg1.content) {
+        if (typeof block.text === "string" && isCoreContext(block.text)) {
+          if (block !== lastBlock) {
+            blocksToMove.push(block);
+          }
         }
+      }
+
+      if (blocksToMove.length > 0) {
+        msg0.content = blocksToMove;
+        msg1.content = [lastBlock];
+        console.log(`[transform] Case A: Moved ${blocksToMove.length} context blocks from Msg 1 to Msg 0.`);
+        processed = true;
       }
     }
 
-    // Move them to msg 0
-    if (blocksToMove.length > 0) {
-      msg0.content = blocksToMove;
+    // Case B: Msg 0 already contains the context, but might need cleaning
+    if (!processed && hasPattern(msg0, "claudeMd")) {
+      const initialCount = msg0.content.length;
+      msg0.content = msg0.content.filter(
+        (block) => typeof block.text === "string" && isCoreContext(block.text),
+      );
+      console.log(`[transform] Case B: Msg 0 filtered (${initialCount} -> ${msg0.content.length} blocks).`);
+      processed = true;
     }
 
-    // 3. msg 1 should only contain the last one
-    msg1.content = [lastBlock];
-    
-    console.log(`[transform] *** Restructured Msg 0/1: Moved ${blocksToMove.length} blocks to Msg 0. Msg 1 trimmed ***`);
+    // Case C: No context found at all
+    if (!processed && !hasPattern(msg0, "claudeMd")) {
+      console.warn("[transform] WARNING: No required context (claudeMd) found in Msg 0 or Msg 1!");
+    }
   } catch (err) {
     console.error("[transform] *** ERROR IN restructureV123 ***", err);
   }
