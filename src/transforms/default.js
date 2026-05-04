@@ -125,7 +125,7 @@ function trimSystem(body) {
 
 function restructureV123(body) {
   try {
-    if (!Array.isArray(body.messages) || body.messages.length === 0) return;
+    if (!Array.isArray(body.messages) || body.messages.length < 2) return;
 
     // Normalize all message contents to arrays for safe processing
     for (const msg of body.messages) {
@@ -146,51 +146,57 @@ function restructureV123(body) {
       );
     };
 
-    const hasSystemTrigger = (msg) => {
-      if (!Array.isArray(msg.content)) return false;
-      return msg.content.some((block) => {
-        if (typeof block.text !== "string") return false;
-        return block.text.includes("<system-reminder>") || block.text.includes("claudeMd");
-      });
+    const isStaleRemovable = (t) => {
+      return (
+        t.startsWith("<system-reminder>") ||
+        t.startsWith("<local-command-stdout>") ||
+        t.startsWith("<local-command-caveat>") ||
+        t.startsWith("<command-name>")
+      );
     };
 
     const coreBlocks = [];
-    const msg0 = body.messages[0];
 
-    // 1. Clean Msg 0 and extract existing core blocks
-    if (Array.isArray(msg0.content)) {
-      for (const block of msg0.content) {
-        if (typeof block.text === "string" && isCoreContext(block.text)) {
-          coreBlocks.push(block);
-        }
-      }
-    }
-
-    // 2. Iterate from Msg 1 to end: find "bloated" messages, extract core, and aggressively trim the rest
-    for (let i = 1; i < body.messages.length; i++) {
+    // 1. Process ALL messages to extract core context and remove stale scaffolding
+    for (let i = 0; i < body.messages.length; i++) {
       const msg = body.messages[i];
-      
-      if (!hasSystemTrigger(msg)) continue; // Skip normal conversation turns
+      if (!Array.isArray(msg.content)) continue;
 
-      const lastBlock = msg.content[msg.content.length - 1];
+      const isTail = i === body.messages.length - 1;
+      const newContent = [];
 
       for (const block of msg.content) {
-        if (typeof block.text === "string" && isCoreContext(block.text) && block !== lastBlock) {
-          coreBlocks.push(block);
+        if (typeof block.text === "string") {
+          if (isCoreContext(block.text)) {
+            // Always extract core context to move to Msg 0
+            coreBlocks.push(block);
+            continue;
+          }
+          if (!isTail && isStaleRemovable(block.text)) {
+            // Drop stale reminders in history (including Msg 0)
+            continue;
+          }
         }
+        // Preserve everything else: tool_results, normal text, tool_use, tail reminders
+        newContent.push(block);
       }
-
-      // Aggressively trim the bloated message down to ONLY its last block
-      msg.content = [lastBlock];
+      msg.content = newContent;
     }
 
-    // 3. Assemble Msg 0 with all collected core blocks
+    // 2. Assemble Msg 0 with the collection of unique core context blocks
+    const msg0 = body.messages[0];
     if (coreBlocks.length > 0) {
-      msg0.content = coreBlocks;
-      msg0.role = "user"; // Ensure Msg 0 is a valid user message
-      console.log(`[transform] restructureV123: Assembled Msg 0 with ${coreBlocks.length} core context blocks. Trimmed bloated messages.`);
-    } else {
-      console.warn("[transform] WARNING: No required context (claudeMd, etc.) found across any messages!");
+      const uniqueCore = [];
+      const seen = new Set();
+      for (const b of coreBlocks) {
+        if (!seen.has(b.text)) {
+          uniqueCore.push(b);
+          seen.add(b.text);
+        }
+      }
+      msg0.content = [...uniqueCore, ...msg0.content];
+      msg0.role = "user";
+      console.log(`[transform] restructureV123: Assembled Msg 0 with ${uniqueCore.length} unique core blocks.`);
     }
 
     // Remove any completely empty messages that might have been created
