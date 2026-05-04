@@ -102,6 +102,18 @@ export function createServer({ config, transformFn }) {
       if (LOG_BODIES) {
         writeRequestLog(
           LOG_DIR,
+          reqId + ".orig",
+          {
+            method: req.method,
+            url: req.url,
+            headers: sanitizeHeaders(req.headers),
+            mutated: false,
+            note: "original request before mutations",
+          },
+          rawBody,
+        );
+        writeRequestLog(
+          LOG_DIR,
           reqId,
           {
             method: req.method,
