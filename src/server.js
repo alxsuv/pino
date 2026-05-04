@@ -100,6 +100,20 @@ export function createServer({ config, transformFn }) {
       notes.push(`beta=${betaStatus}`);
 
       if (LOG_BODIES) {
+        // logging the original request
+
+        // writeRequestLog(
+        //   LOG_DIR,
+        //   reqId + ".orig",
+        //   {
+        //     method: req.method,
+        //     url: req.url,
+        //     headers: sanitizeHeaders(req.headers),
+        //     mutated: false,
+        //     note: "original request before mutations",
+        //   },
+        //   rawBody,
+        // );
         writeRequestLog(
           LOG_DIR,
           reqId,
